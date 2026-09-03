@@ -1,0 +1,55 @@
+Revision history for Perl extension Data::JPack.
+
+v0.3.2 2026-06-29
+  [fixes]
+    - Update dependency JavaScript::Minifier::XS to v0.16 to address memory
+      leaks
+
+v0.3.1 2026-05-27
+  [fixes]
+    - Base template now calls jack app and css files.
+    - Fix template path
+    - Add base application App
+
+v0.3.0 2026-04-21
+  [features]
+    - add css and javascript minification support
+    - add CSS::Minifier::XS and JavaScript::Minifier::XS as deps
+    - Add (poor) documentation
+  
+  [fixes]
+    - Return list of paths when bootstrapped file exists
+
+v0.2.3 2026-02-27
+  [fixes]
+    - JS More readable loading display in client
+    - PERL Add base template class for re-usability
+    - localize_table now works as expected
+
+v0.2.2 2025-10-01
+  [fixes]
+    - Fix filename globbing for paths with spaces
+
+v0.2.1 2025-09-10
+  [fixes]
+    - die if directory cannot be made
+    - remove debug statements
+
+v0.2.0 2025-05-26
+  -  Added uuid generation (https://github.com/verzth/uuid-js) to overcome non
+     secure context limitation in browser cryto api
+
+  -  Added hashing functions (https://github.com/Caligatio/jsSHA) to overcome
+     non secure context limititions in broswer cryto api secure context
+
+  - Removed artifcat files from distribution
+
+v0.1.1  2024-12-13
+  [improvements]
+    - added OO API ->encode_file. Reads input file, encodes, and writes to
+      output file if supplied.
+  
+v0.1.0  2024-10-22
+	- original version; created by h2xs 1.23 with options
+		-PX -n Data::JPack
+
