@@ -1,5 +1,5 @@
 # JPack application (web client)
-package uSAC::HTTP::App::JPack
+package uSAC::HTTP::App::JPack;
 our $VERSION="v0.2.0";
 
 use v5.36;

@@ -1,11 +1,11 @@
 @{[ init {
   use feature ":all";
-  use Data::JPack::App;
+  use uSAC::HTTP::App::JPack;
 
 
   # BOOTSTAPPING OF A JPACK APP
   # 
-  my %map=Data::JPack::App->_bootstrap;
+  my %map=uSAC::HTTP::App::JPack->_bootstrap;
 
   for(keys %map){
     $self->add_resource($_, output=>$map{$_});
