@@ -8,11 +8,12 @@ catch(e){
 //
 function wp_bootstrap(parameters){
 	//Also will have options passsed here
-//	setInterval(()=>{console.log("From template worker", JSON.parse(parameters))},1000);
+  //setInterval(()=>{console.log("From template worker", JSON.parse(parameters))},1000);
 	let scope=self;
 	self["addFunction"]=function (argHash){
+    console.log("IN ADD FUNCTION IN WORKER");
+		console.log("addFunction from worker",self[argHash.name]);
 		self[argHash.name]= new Function(argHash.arg,argHash.body);
-		//console.log("addFunction from worker",self[argHash.name]);
 		return ["addFunctionReturn",{},[]];
 	}
 
@@ -62,11 +63,24 @@ function wp_bootstrap(parameters){
 		return ["decodeReturn",out,[]];
 	}
 
+  //For shared workers
+  let connections=[];
+  self.onconnect=function(e){
+    const port=e.ports[0];
+    connections.push(port);
+    
+    port.onmessage=function(e){
+				console.log("remote function call (shared)",e.data);
+				let name,result,transfer;
+				[name,result,transfer]=scope[e.data.name](e.data.arg);
+				port.postMessage({cmd:"callFunctionReturn",name:name,result:result},transfer);
+    };
+  };
 
-	
+  //For normal workers
         onmessage=function(e){
 
-				//console.log("remote function call",e.data);
+				console.log("remote function call",e.data);
 				let name,result,transfer;
 				[name,result,transfer]=scope[e.data.name](e.data.arg);
 				postMessage({cmd:"callFunctionReturn",name:name,result:result},transfer);
@@ -78,6 +92,7 @@ function wp_bootstrap(parameters){
 //Stub class providing functional access to worker
 class WorkerTemplate{
 	constructor(parameters){
+    console.log("NEW WORKER template:", parameters);
 		this.id=parameters.id;
 		let p=JSON.stringify(parameters);
 
@@ -86,8 +101,17 @@ class WorkerTemplate{
 		//console.log(code);
 		//this.promise=undefined;
 		let blob=new Blob([code],{type:"text/javascript"});
-		this.worker=new Worker(window.URL.createObjectURL(blob));
-		this.worker.addEventListener("message",(e)=>this.fromWorker(e));
+    if(parameters.shared){
+      console.log("----Creating new shared worker----");
+      this.worker=new SharedWorker(window.URL.createObjectURL(blob));
+
+      this.worker.port.start();
+		  this.worker.port.onmessage= (e)=>{this.fromWorker(e)};
+    }
+    else{
+		  this.worker=new Worker(window.URL.createObjectURL(blob));
+		  this.worker.addEventListener("message",(e)=>this.fromWorker(e));
+    }
 
 		//Setup a queue for requests
 		this.isBusy=false;
@@ -96,6 +120,7 @@ class WorkerTemplate{
 	}
 
 	fromWorker(e){
+    console.log("IN FROM WORKER", e.data);
 
 		switch(e.data.cmd){
 			case "callFunctionReturn":
@@ -111,7 +136,7 @@ class WorkerTemplate{
 				break;
 		}
 
-		this.worker
+    //this.worker
 	}
 
 
@@ -130,15 +155,23 @@ class WorkerTemplate{
 
 	}
 	_executeNext(){
-    //console.log("is busy", this.isBusy);
+    console.log("is busy", this.isBusy);
 		if((!this.isBusy) && (this.requestQueue.length>0)){
-			//console.log(`POSTING TO WORKER ${this.id}`);
+			console.log(`POSTING TO WORKER ${this.id}`);
 			this.isBusy=true;
 			let r=this.requestQueue.shift();
 			this.responseQueue.push(r);
       //console.log("_in execute next", r);
       try {
-			  this.worker.postMessage({cmd:"callFunction",name:r.name, arg:r.arg },r.transfer);
+        if(this.worker.port !== undefined){
+          //Shared worker
+          console.log("posting for shared worker", r.name );
+			    this.worker.port.postMessage({cmd:"callFunction",name:r.name, arg:r.arg },r.transfer);
+        }
+        else{
+          console.log("posting for normal worker");
+			    this.worker.postMessage({cmd:"callFunction",name:r.name, arg:r.arg },r.transfer);
+        }
       }
       catch(e){
         let er={data:{name:"error", result:undefined}};
@@ -156,9 +189,11 @@ class WorkerTemplate{
 
 
 class WorkerPool {
-	constructor(count){
+	constructor(count, shared){
 		this.availableQueue=[];
 		this.pool=[];
+    this.shared=shared;
+
 		this.callQueue=[];
 		this.callMap={};
 		this.addWorkers(count);
@@ -171,7 +206,8 @@ class WorkerPool {
 		let w;
 		let id=this.pool.length;
 		for(let i=0;i<count;i++){
-			w=new WorkerTemplate({id:id+i});
+			w=new WorkerTemplate({id:id+i, shared:this.shared}
+      );
 			this.pool.push(w);
 			this.availableQueue.push(w);
 			w.manager=this;
@@ -189,8 +225,8 @@ class WorkerPool {
 		
 	}
 	addFunctions(refs,names){
-    //console.log("Add functions");
-    //console.log(refs);
+    console.log("Add functions");
+    console.log(refs);
 		let p=[];
 		if(names===undefined){
 			names=new Array(refs.length);
@@ -203,7 +239,7 @@ class WorkerPool {
 	}
 	//Directly calls each worker to add the function.
 	addFunction(ref,name,apiFlag){
-    //console.log("Add function");
+    console.log("Add function");
     //console.log(ref);
 		//Testif function alread has been added to the pool
 		for(let i=0;i<this.existingFunctions.length;i++){
@@ -212,7 +248,7 @@ class WorkerPool {
 				return Promise.resolve();
 			}
 		}
-		//console.log("POOL adding new function",ref.name);
+		console.log("POOL adding new function",ref.name);
 		this.existingFunctions.push(ref);
 		let string=ref.toString();
 		let n=string.substring(string.indexOf(" ")+1,string.indexOf("("));
