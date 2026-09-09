@@ -62,7 +62,10 @@ function wp_bootstrap(parameters){
 	self["decode"]=function(argHash){
 		let out=decode(argHash.options,argHash.string);
 		return ["decodeReturn",out,[]];
-	}
+	};
+
+  self["_client_close_"]=function(argHash){
+  };
 
   //For shared workers
   let connections=[];
@@ -73,10 +76,23 @@ function wp_bootstrap(parameters){
     port.onmessage=function(e){
 				console.log("remote function call (shared)",e.data);
 				let name,result,transfer;
-				[name,result,transfer]=scope[e.data.name](e.data.arg);
+        if(e.data.name == "_client_close_"){
+          console.log("WORKER CLIENT IS CLOSING... remove port", port);
+          // Remove the port from the connections list
+          for(let i=0;i<connections.legnth; i++){
+            if(connections[i] == port){
+              connections.splice(i,1);
+            }
+          }
+
+        }
+
+        else {
+				  [name,result,transfer]=scope[e.data.name](e.data.arg);
+        }
 				port.postMessage({cmd:"callFunctionReturn",name:name,result:result},transfer);
     };
-  };
+  }
 
   //For normal workers
         onmessage=function(e){
@@ -110,6 +126,11 @@ class WorkerTemplate{
 
       this.worker.port.start();
 		  this.worker.port.onmessage= (e)=>{this.fromWorker(e)};
+            // Tell the SharedWorker we're closing
+      addEventListener('beforeunload', (e)=> {
+          this.worker.port.postMessage( {cmd:"callFunction", name:'_client_close_'} );
+      });
+
     }
     else{
 		  //this.worker=new Worker(window.URL.createObjectURL(blob));
