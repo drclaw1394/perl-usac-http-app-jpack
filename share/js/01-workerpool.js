@@ -18,6 +18,7 @@ function wp_bootstrap(parameters){
 	}
 
 	self["importScript"]=function(argHash){
+    console.log("IN import script IN WORKER");
 		eval(argHash);	
 		return["importScriptReturn",{},[]];
 	}
@@ -100,16 +101,19 @@ class WorkerTemplate{
 		code+=")(\'"+p+"\')";
 		//console.log(code);
 		//this.promise=undefined;
-		let blob=new Blob([code],{type:"text/javascript"});
+    //let blob=new Blob([code],{type:"text/javascript"});
+    let url="data:text/javascript;base64,"+btoa(code);
     if(parameters.shared){
       console.log("----Creating new shared worker----");
-      this.worker=new SharedWorker(window.URL.createObjectURL(blob));
+      //this.worker=new SharedWorker(window.URL.createObjectURL(blob));
+      this.worker=new SharedWorker(url);
 
       this.worker.port.start();
 		  this.worker.port.onmessage= (e)=>{this.fromWorker(e)};
     }
     else{
-		  this.worker=new Worker(window.URL.createObjectURL(blob));
+		  //this.worker=new Worker(window.URL.createObjectURL(blob));
+		  this.worker=new Worker(url);
 		  this.worker.addEventListener("message",(e)=>this.fromWorker(e));
     }
 
@@ -237,6 +241,20 @@ class WorkerPool {
 		}
 		return Promise.all(p);
 	}
+
+  // Easy way to add a class to a worker
+  addClass(ref){
+		let string=ref.toString();
+    let name=ref.name;
+    string="self."+name+"=("+string+")";
+
+		let p=[];
+		for(let i=0;i<this.pool.length;i++){
+			p.push(this.pool[i].callFunction("importScript",string,[]));
+		}
+		return Promise.all(p);
+  }
+
 	//Directly calls each worker to add the function.
 	addFunction(ref,name,apiFlag){
     console.log("Add function");
