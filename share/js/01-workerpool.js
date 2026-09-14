@@ -68,29 +68,48 @@ function wp_bootstrap(parameters){
   };
 
   //For shared workers
-  let connections=[];
+  self.connections=[];
   self.onconnect=function(e){
     const port=e.ports[0];
     connections.push(port);
     
     port.onmessage=function(e){
 				console.log("remote function call (shared)",e.data);
-				let name,result,transfer;
+				let name,result, transfer;
         if(e.data.name == "_client_close_"){
           console.log("WORKER CLIENT IS CLOSING... remove port", port);
           // Remove the port from the connections list
-          for(let i=0;i<connections.legnth; i++){
-            if(connections[i] == port){
+          for(let i=0; i<connections.length; i++){
+            console.log("testing against connections");
+            if(connections[i] === port){
               connections.splice(i,1);
+              break;
             }
           }
+          let last=connections.length==0;
+          console.log("Closing shared worker.. is this connection the last ?", last, connections.length);
+          result={last:last};
 
         }
 
         else {
-				  [name,result,transfer]=scope[e.data.name](e.data.arg);
+            let t=scope[e.data.name](e.data.arg);
+          console.log(t);
+				  [name,result,transfer]=t;
+
         }
-				port.postMessage({cmd:"callFunctionReturn",name:name,result:result},transfer);
+        if(name instanceof Promise){
+				  name.then((data)=>{
+            console.log("return from worker function included a promise", data);
+            [name, result, transfer]=data;
+            port.postMessage({cmd:"callFunctionReturn",name:name,result:result},transfer);
+
+          })
+        }
+        else {
+
+				  port.postMessage({cmd:"callFunctionReturn",name:name,result:result},transfer);
+        }
     };
   }
 
@@ -199,6 +218,7 @@ class WorkerTemplate{
         }
       }
       catch(e){
+        console.log("CAUGHT ", e);
         let er={data:{name:"error", result:undefined}};
         // Could not send message, probably a bad argument. Make as not busy
 				let r=this.responseQueue.shift();
@@ -249,7 +269,7 @@ class WorkerPool {
 		return Promise.all(p);
 		
 	}
-	addFunctions(refs,names){
+	addFunctions(refs, names){
     console.log("Add functions");
     console.log(refs);
 		let p=[];
@@ -258,7 +278,7 @@ class WorkerPool {
 		}
 		//console.log(refs,names);
 		for(let i=0;i<refs.length;i++){
-			p.push(this.addFunction(refs[i],names[i]));
+			p.push(this.addFunction(refs[i], names[i]));
 		}
 		return Promise.all(p);
 	}
@@ -277,7 +297,7 @@ class WorkerPool {
   }
 
 	//Directly calls each worker to add the function.
-	addFunction(ref,name,apiFlag){
+	addFunction(ref, name, apiFlag){
     console.log("Add function");
     //console.log(ref);
 		//Testif function alread has been added to the pool
@@ -472,6 +492,117 @@ class LoadingDisplay {
   }
 }
 
+// The class  and functions to install on the shared worker
+class SharedWorkerPoolManager {
+  constructor(){
+  // DO NOT CREATE NEW pool here. Hare are given the workers created by the UI Thread
+
+  }
+
+}
+
+
+function init_shared_worker_pool_manager_worker(){
+    //Only do this once
+    console.log("Init in shared worker pool manager", self.upload_manager);
+    
+    let first=false;
+    if(self.shared_worker_pool_manager){
+      // Already exists... do not reinitialise
+      console.log("Init in worker pool manager. first time, create new manager object in worker");
+
+    }
+    else {
+      // Create a new one
+      self.shared_worker_pool_manager=new SharedWorkerPoolManager();
+      console.log("Init in worker pool manager. NOT first time ");
+      first=true;
+    }
+
+    return ["INIT", {first:first}, undefined];
+
+}
+
+
+
+
+
+function transfer_port_worker(arg){
+  // port is a transferable object. This adds it to the to the shared worker
+  // pool manager so messages can be sent to workers
+  let m=window.shared_worker_pool_manager;
+  
+
+}
+
+// UI side stub code to load and setup a shared worker
+class SharedWorkerPool extends WorkerPool {
+  constructor(count, parameters){
+    super(count, parameters);
+
+    // This is the manager object. ONLY ONE CAN EXIST.
+    if(!window.shared_worker_pool_manager){
+      console.log("--- Creating a new shared worker pool manager");
+	    window.shared_worker_pool_manager=new WorkerPool(1, {id:0, shared:"shared_worker_pool_manager"});
+
+      // THis is the first time the shared workers have attempted spawning
+      // So we need to transfer the  ports to the manager
+      //
+    }
+    else {
+      console.log("--- Shared worker pool manager already exists");
+    }
+
+    this.manager=window.shared_worker_pool_manager;
+  }
+
+  addScriptBody(string, manager_flag){
+    if(manager_flag){
+      return this.manager.addScriptBody(string);
+    }
+    else {
+      return this.pool.addScriptBody(string);
+    }
+  }
+
+  addFunctions(refs, names, manager_flag){
+    if(manager_flag){
+      return this.manager.addFunctions(refs, names);
+    }
+    else {
+      return this.pool.addFunctions(refs, names);
+    }
+  }
+
+  addFunction(ref,name, apiFlag, manager_flag){
+    if(manager_flag){
+      return this.manager.addFunction(ref, name, apiFlag);
+    }
+    else {
+      return this.pool.addFunction(ref, name, apiFlag);
+    }
+  }
+
+  addClass(ref, manager_flag){
+    if(manager_flag){
+      return this.manager.addClass(ref);
+    }
+    else {
+      return this.pool.addClass(ref);
+    }
+  }
+
+	queueFunction(name, arg, transfer, manager_flag){
+    console.log("QUEUE function call in shared manager");
+    if(manager_flag){
+      return this.manager.queueFunction(name, arg, transfer);
+    }
+    else{
+      return this.pool.queueFunction(name, arg, transfer);
+    }
+  }
+}
+
 // Create gloabl scriptLoader variable
 scriptLoader=new ScriptLoader();
 
@@ -479,5 +610,8 @@ window.LoadingDisplay=LoadingDisplay;
 window.WorkerPool=WorkerPool
 window.ScriptLoader=ScriptLoader;
 window.WorkerTemplate=WorkerTemplate;
+
+window.SharedWorkerPool=SharedWorkerPool;
+window.SharedWorkerPoolManager=SharedWorkerPoolManager;
 
 }
