@@ -12,6 +12,8 @@
     append_slot(head_start=>qq{<script src="@{[res $_]}"></script>});
   }
 
+  $self->add_resource("js/sha.js", output=>"app/lib/sha.js");
+
   #
 
 }]}
