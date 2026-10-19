@@ -125,7 +125,15 @@ function wp_bootstrap(parameters){
 
 
 
-//Stub class providing functional access to worker
+/*
+ * Class providing functional access to worker
+ * If parameters.shared has a true value, the worker becomes shared This value
+ * is appended to the URL encoded data string identifying the worker.
+ * If more than one shared worker is requires, creating a new worker with a new
+ * true shared value will give to a new shared worker
+ * 
+ *
+ */
 class WorkerTemplate{
 	constructor(parameters){
     console.log("NEW WORKER template:", parameters);
@@ -535,7 +543,14 @@ function transfer_port_worker(arg){
 
 }
 
-// UI side stub code to load and setup a shared worker
+/* UI main thread code to load and setup a shared workers It is a wrapper
+ * around a normal, but singleton WorkerPool. If the singleton WorkerPool
+ * already exists a new one is not created. A reference to it is usedin this
+ * SharedWorkerPool
+ * 
+ * Shared workers must be created by the main thread, 
+ *
+ */
 class SharedWorkerPool extends WorkerPool {
   constructor(count, parameters){
     super(count, parameters);
