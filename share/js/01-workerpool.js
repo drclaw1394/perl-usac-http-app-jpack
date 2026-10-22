@@ -71,6 +71,7 @@ function wp_bootstrap(parameters){
   self.connections=[];
   self.onconnect=function(e){
     const port=e.ports[0];
+    port.start();
     connections.push(port);
     
     port.onmessage=function(e){
@@ -93,6 +94,7 @@ function wp_bootstrap(parameters){
         }
 
         else {
+          console.log("function call in shared worker", e.data);
             let t=scope[e.data.name](e.data.arg);
           console.log(t);
 				  [name,result,transfer]=t;
@@ -137,6 +139,23 @@ function wp_bootstrap(parameters){
 class WorkerTemplate{
 	constructor(parameters){
     console.log("NEW WORKER template:", parameters);
+    if(parameters.port){
+      console.log("NEW WORKER VIA PORTS");
+      // If a port is given, we have been given an existing created worker
+      // 
+      this.worker={};
+      this.worker.port=parameters.port;
+
+      // Register special 
+      //this.worker.port.start();  // Should be already started??
+      this.worker.port.onmessage= (e)=>{this.fromWorker(e)};
+        // Tell the SharedWorker we're closing
+        addEventListener('beforeunload', (e)=> {
+          this.worker.port.postMessage( {cmd:"callFunction", name:'_client_close_'} );
+      });
+    }
+    else{
+
 		this.id=parameters.id;
 		let p=JSON.stringify(parameters);
 
@@ -146,23 +165,24 @@ class WorkerTemplate{
 		//this.promise=undefined;
     //let blob=new Blob([code],{type:"text/javascript"});
     let url="data:text/javascript;base64,"+btoa(code);
-    if(parameters.shared){
-      console.log("----Creating new shared worker----");
-      //this.worker=new SharedWorker(window.URL.createObjectURL(blob));
-      this.worker=new SharedWorker(url);
+      if(parameters.shared){
+        console.log("----Creating new shared worker----");
+        //this.worker=new SharedWorker(window.URL.createObjectURL(blob));
+        this.worker=new SharedWorker(url);
 
-      this.worker.port.start();
-		  this.worker.port.onmessage= (e)=>{this.fromWorker(e)};
-            // Tell the SharedWorker we're closing
-      addEventListener('beforeunload', (e)=> {
+        this.worker.port.start();
+        this.worker.port.onmessage= (e)=>{this.fromWorker(e)};
+        // Tell the SharedWorker we're closing
+        addEventListener('beforeunload', (e)=> {
           this.worker.port.postMessage( {cmd:"callFunction", name:'_client_close_'} );
-      });
+        });
 
-    }
-    else{
-		  //this.worker=new Worker(window.URL.createObjectURL(blob));
-		  this.worker=new Worker(url);
-		  this.worker.addEventListener("message",(e)=>this.fromWorker(e));
+      }
+      else{
+        //this.worker=new Worker(window.URL.createObjectURL(blob));
+        this.worker=new Worker(url);
+        this.worker.addEventListener("message",(e)=>this.fromWorker(e));
+      }
     }
 
 		//Setup a queue for requests
@@ -256,15 +276,31 @@ class WorkerPool {
 
 	addWorkers(count){
 		//Generate pool of workers
-		let w;
-		let id=this.pool.length;
-		for(let i=0;i<count;i++){
-			w=new WorkerTemplate({id:id+i, shared:this.shared}
-      );
-			this.pool.push(w);
-			this.availableQueue.push(w);
-			w.manager=this;
-		}
+    //
+    if(count instanceof Array){
+      console.log("ADDING WORKERS WITH PORTS ARRAY");
+      //With an array we are assuming a list of ports. We set up a shared
+      //worker stub, as the shared worker is already created
+      let w;
+      let id=this.pool.length;
+      for(let i=0;i<count.length;i++){
+        w=new WorkerTemplate({port: count[i], id:id+i, shared:this.shared});
+        this.pool.push(w);
+        this.availableQueue.push(w);
+        w.manager=this;
+      }
+    }
+    else {
+      let w;
+      let id=this.pool.length;
+      for(let i=0;i<count;i++){
+        w=new WorkerTemplate({id:id+i, shared:this.shared}
+        );
+        this.pool.push(w);
+        this.availableQueue.push(w);
+        w.manager=this;
+      }
+    }
 	}
 
 	addScriptBody(string){
@@ -337,16 +373,27 @@ class WorkerPool {
 	//To ensure sane sequencing, use callFunction instead
 	
 	//Round robin worker selection
-	queueFunction(name, arg, transfer){
-		let wid=this.callID%this.pool.length;
-		this.callID++;
-		return this.pool[wid].callFunction(name,arg,transfer)
+	queueFunction(name, arg, transfer, worker){
+    //let wid=this.callID%this.pool.length;
+    //this.callID++;
+    let w=worker||this.nextWorker();
+		//return this.pool[wid].callFunction(name,arg,transfer)
+		return w.callFunction(name,arg,transfer)
 		.then((e)=>{
-			return Promise.resolve({name:e.data.name, result:e.data.result});
+			return Promise.resolve({worker:w, name:e.data.name, result:e.data.result});
 
 		});
 
 	}
+
+  //Return the next worker
+  //Currently just round robin
+  nextWorker(){
+    let wid=this.callID%this.pool.length;
+    this.callID++;
+    return this.pool[wid];
+  }
+
 
 }
 
@@ -509,10 +556,9 @@ class SharedWorkerPoolManager {
 
 }
 
-
 function init_shared_worker_pool_manager_worker(){
     //Only do this once
-    console.log("Init in shared worker pool manager", self.upload_manager);
+    console.log("Init in shared worker pool manager");
     
     let first=false;
     if(self.shared_worker_pool_manager){
@@ -534,19 +580,30 @@ function init_shared_worker_pool_manager_worker(){
 
 
 
-
-function transfer_port_worker(arg){
+function transfer_ports_worker(arg){
   // port is a transferable object. This adds it to the to the shared worker
   // pool manager so messages can be sent to workers
-  let m=window.shared_worker_pool_manager;
+  //let m=window.shared_worker_pool_manager;
   
+  // Create a WorkerPool it it hasn't aready been created, with the ports
+  let ports=arg.ports;
+  if(!self.worker_pool){
+    console.log("Creating a Worker Pool on shared worker");
+    self.worker_pool=new WorkerPool(ports);
 
+  }
+  else {
+    //Otherwise ignore?
+  }
+  return ["TRANSFER_PORTS", {}, undefined];
 }
 
-/* UI main thread code to load and setup a shared workers It is a wrapper
- * around a normal, but singleton WorkerPool. If the singleton WorkerPool
- * already exists a new one is not created. A reference to it is usedin this
- * SharedWorkerPool
+/* UI main thread code to load and setup a shared workers marshalled by a
+ * single shared worker.
+ *
+ * It is a wrapper around a normal worker, but is a singleton (by id).
+ * If the singleton WorkerPool already exists a new one is not
+ * created. A reference to it is used in this SharedWorkerPool
  * 
  * Shared workers must be created by the main thread, 
  *
@@ -558,17 +615,44 @@ class SharedWorkerPool extends WorkerPool {
     // This is the manager object. ONLY ONE CAN EXIST.
     if(!window.shared_worker_pool_manager){
       console.log("--- Creating a new shared worker pool manager");
-	    window.shared_worker_pool_manager=new WorkerPool(1, {id:0, shared:"shared_worker_pool_manager"});
+	    this.manager=window.shared_worker_pool_manager=new WorkerPool(1, {id:0, shared:"shared_worker_pool_manager"});
 
-      // THis is the first time the shared workers have attempted spawning
-      // So we need to transfer the  ports to the manager
+      // THis is the first time the shared workers have attempted spawning So
+      // we need to transfer the  ports to the manager
       //
+      // Call transfer_ports on the worker pool (shared only) with a reference
+      // to this manager pool.
+      //
+
+      // Add Worker pool to delegate/proxy
+      console.log("Adding WorkerPool class to peer");
+      this.manager.addClass(WorkerTemplate, true).then(()=>{
+        return this.manager.addClass(WorkerPool, true)
+      })
+      .then(()=>{
+
+        // Add function to handle port transfers of workers (shared)
+        //
+        console.log("Adding transfer_ports_worker function");
+        return this.manager.addFunctions([transfer_ports_worker], undefined, true);
+      })
+      .then(()=>{
+        //Gather Ports for transfer
+        let ports=[];
+        
+        for(let i=0; i<this.pool.length; i++){
+          ports[i]=this.pool[i].worker.port;
+        }
+        return this.manager.queueFunction("transfer_ports_worker", {ports: ports}, ports,undefined, true);
+        //return Promise.resolve();
+      });
+
     }
     else {
       console.log("--- Shared worker pool manager already exists");
+      this.manager=window.shared_worker_pool_manager;
     }
 
-    this.manager=window.shared_worker_pool_manager;
   }
 
   addScriptBody(string, manager_flag){
@@ -576,7 +660,7 @@ class SharedWorkerPool extends WorkerPool {
       return this.manager.addScriptBody(string);
     }
     else {
-      return this.pool.addScriptBody(string);
+      return super.addScriptBody(string);
     }
   }
 
@@ -585,7 +669,7 @@ class SharedWorkerPool extends WorkerPool {
       return this.manager.addFunctions(refs, names);
     }
     else {
-      return this.pool.addFunctions(refs, names);
+      return super.addFunctions(refs, names);
     }
   }
 
@@ -594,7 +678,7 @@ class SharedWorkerPool extends WorkerPool {
       return this.manager.addFunction(ref, name, apiFlag);
     }
     else {
-      return this.pool.addFunction(ref, name, apiFlag);
+      return super.addFunction(ref, name, apiFlag);
     }
   }
 
@@ -603,17 +687,17 @@ class SharedWorkerPool extends WorkerPool {
       return this.manager.addClass(ref);
     }
     else {
-      return this.pool.addClass(ref);
+      return super.addClass(ref);
     }
   }
 
-	queueFunction(name, arg, transfer, manager_flag){
+	queueFunction(name, arg, transfer, worker, manager_flag){
     console.log("QUEUE function call in shared manager");
     if(manager_flag){
       return this.manager.queueFunction(name, arg, transfer);
     }
     else{
-      return this.pool.queueFunction(name, arg, transfer);
+      return super.queueFunction(name, arg, transfer);
     }
   }
 }
